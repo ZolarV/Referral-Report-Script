@@ -23,8 +23,10 @@ $emed_web_Submit = "tabContainer_tabSearch_btnHSubmit"
 $fixedCSV = @()
 
 # Referral_Report Location xls  on COS
-$rrl = "\\Analyzer\Analyzer\Snapshots\cos\Excel\daily\rr1csv.csv"  # need to fix
-$header = "Location","Count","Provider","Appt Date","Enc","Acct #","Patient","Entered by","Insurance", "Error"
+$local_Ref_Rep_Dir = "$home\desktop\Local Referral Report"
+$ref_Rep_name = "Referral_Report.xls"
+$rrl = "\\Analyzer\Analyzer\Snapshots\cos\Excel\daily\Referral_Report.xls"  
+$header = 
 $occreds = Get-Cred -Whatfor "OC Credentials"
 $idxCreds = Get-Cred  -Whatfor "Centricity Credentials"
 $emedCreds = Get-Cred  -Whatfor "oc.emedeconnect credentials"
@@ -33,12 +35,18 @@ $emedCreds = Get-Cred  -Whatfor "oc.emedeconnect credentials"
 [void] [System.Reflection.Assembly]::LoadWithPartialName("'System.Windows.Forms")
 [void] [System.Reflection.Assembly]::LoadWithPartialName("'Microsoft.VisualBasic")
 
+# Creates Local Referral report folder and downloads current report
+if(!(Test-Path -Path "$home\desktop\Local Referral Report")){
+		New-Item -Path $home\desktop\ -Name "Local Referral Report" -ItemType dir
+	}
+Start-BitsTransfer -Source $rrl -Credential (Get-Credential) -Destination "$home\desktop\Local Referral Report"
+
 
 function Add-Data{
 Param(
-[Parameter(Mandatory=$TRUE)][PSObject]$ReturnObject, 
+[Parameter(Mandatory=$true)][PSObject]$ReturnObject, 
 [Parameter(Mandatory=$true)][int]$counter,
-[Parameter(Mandatory= $true)][Object]$Dataobject)
+[Parameter(Mandatory=$true)][Object]$Dataobject)
 $ReturnObject | Add-Member -type NoteProperty -Name $header[$counter] -Value $DataObject."$($header[$counter])"
 }
 
@@ -57,7 +65,6 @@ foreach( $line in $shitCSV){
   $FixedCSV += $temp
   $last = $temp
  }
-
 }
 
 function SelectData-byClinic {
@@ -145,24 +152,29 @@ $emed_page =New-Webpage $ocemed
 Write-Output "Get Emed Credentials"
 $emed_creds = Get-Cred
 Input-creds -Credentials $emed_creds -WebPage $emed_page
+return $emed_page
 }
+
 # Function gets Elements on webpage by ID
 Function Get-ElementbyID{
 Param([Parameter(Mandatory=$TRUE)][string]$WebPage,[Parameter(Mandatory=$TRUE)][string]$ID)
 Return $webpage.Document.getElementById($ID)
 }
+
 #Function Input's credentials into a website
 Function Input-creds{
 Param([Parameter(Mandatory=$TRUE)][pscustomObject]$Credentials,[Parameter(Mandatory=$TRUE)][string]$WebPage)
 (Get-ElementbyID -WebPage $WebPage -ID $emed_web_use).value = $Credentials.user
 (Get-ElementbyID -WebPage $WebPage -ID $emed_web_pass).value = $Credentials.pass
 }
+
 #function searches Emed website
 Function Search-Emed {
 Param([Parameter(Mandatory=$TRUE)][string]$WebPage,[Parameter(Mandatory=$TRUE)][string]$Search)
 (Get-ElementbyID -WebPage $WebPage -ID $emed_web_SubID).value = $Search 
 (Get-ElementbyID -WebPage $WebPage -ID $emed_web_Submit).click() 
 }
+
 #function searches IDX PM by patient account number
 function Patient-Manager {
 Param([Parameter(Mandatory=$TRUE)][int]$patientAccountNumber)
@@ -176,8 +188,8 @@ Function Main-Main {
 Write-Host "Welcome to the Referral Automation Application"
 $again = 0
 While($again -eq 0){
- Write-Host "What would you like to do?"
- Write-host "Options:
+	Write-Host "What would you like to do?"
+	Write-host "Options:
                 Get Referral         (1)
                 Login Centricity     (2)
                 Login medEconnect    (3)
@@ -185,25 +197,9 @@ While($again -eq 0){
                 xx ist               (5)"
         $input =  Read-Host "Input Selection:"
         Switch ($input){
-        1{
-        try { 
-        
-        if ( -not (Test-Path -Path $rrl -Credential $occreds) ) {
-        throw 'The file does not exist'  }
-        } catch {  
-        $_
+        1{  ;break}
         }
-
-
-
-           ;break}
-
-        }
-
-
-
-
-
+	}
 }
 Function Test-VarSet{
 }
@@ -218,9 +214,24 @@ Return $esult
 
 
 
+Function ExportWSToCSV ($input_File, $output_Location )
+{
+    $E = New-Object -ComObject Excel.Application
+    $E.Visible = $false
+    $E.DisplayAlerts = $false
+    $wb = $E.Workbooks.Open($input_File)
+    foreach ($ws in $wb.Worksheets)
+    {
+        $n = "Referral_Report" + "_" + $ws.Name
+        $ws.SaveAs($output_Location + $n + ".csv", 6)
+    }
+    $E.Quit()
+}
+
+
 Try{
 if((Test-Variable($ocemed)))
-{Write-host '$ocemed Is empty'
+{Write-host '$ocemed is empty'
 
 }}
 Catch
