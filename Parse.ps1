@@ -8,6 +8,7 @@
 #
 #
 #
+
 # Constant defines
 # Web Pages
 $idx = "http://idx/gpmsweb"
@@ -26,7 +27,8 @@ $fixedCSV = @()
 $local_Ref_Rep_Dir = "$home\desktop\Local Referral Report"
 $ref_Rep_name = "Referral_Report.xls"
 $rrl = "\\Analyzer\Analyzer\Snapshots\cos\Excel\daily\Referral_Report.xls"  
-$header = 
+$Full_header = "Location","Count","Provider","Appt Date","Enc","Acct #"," ","Patient","Entered by","Insurance", "Error"
+$Trunc_header = $Full_header = "Location","Count","Provider","Appt Date","Enc","Acct #","Patient","Entered by","Insurance", "Error"
 $occreds = Get-Cred -Whatfor "OC Credentials"
 $idxCreds = Get-Cred  -Whatfor "Centricity Credentials"
 $emedCreds = Get-Cred  -Whatfor "oc.emedeconnect credentials"
@@ -41,7 +43,7 @@ if(!(Test-Path -Path "$home\desktop\Local Referral Report")){
 	}
 Start-BitsTransfer -Source $rrl -Credential (Get-Credential) -Destination "$home\desktop\Local Referral Report"
 
-
+# Consolidates and completes each CSV object
 function Add-Data{
 Param(
 [Parameter(Mandatory=$true)][PSObject]$ReturnObject, 
@@ -52,7 +54,7 @@ $ReturnObject | Add-Member -type NoteProperty -Name $header[$counter] -Value $Da
 
 #  dynamically  name a variable with a variable === $value=$NetworkInfo."$($_.Name)"
 function Format-the-fucking-data {
-$shitCSV = Import-Csv $rrl -Header $header 
+$shitCSV = (Import-Csv $rrl -Header $Full_header | Select-Object $Trunc_header | Select-Object -Skip 1)
 foreach( $line in $shitCSV){
   $temp = New-Object PSObject
   $indexer = 0
@@ -73,7 +75,6 @@ $filtered = $DataObject | Where-Object {$_."$Field" -like $SearchName  }
 return $Filtered
 }
 
-
 #Stupid function
 Function New-Webpage{
 Param([Parameter(Mandatory=$TRUE)][String]$page, [Parameter(Mandatory=$false)][int]$vis)
@@ -81,39 +82,121 @@ Param([Parameter(Mandatory=$TRUE)][String]$page, [Parameter(Mandatory=$false)][i
     if($vis -eq 0){ $ie.visible = $true} 
     else{$ie.visible = $false} 
     $ie.navigate2($page)
+	while($ie.busy) {sleep 3} 
 return $ie
 }
 
+Function IDX-NavButtons{
+	$Custom = New-Object psobject
+	$homepage  =  $idxhome.Document.frames[0].document.getElementsByTagName("a")
+	$Custom | Add-Member -type NoteProperty -Name "HomePage"  -Value  $homepage
+	$Custom | Add-Member -type NoteProperty -Name "Login"  -Value  ($homepage | Where-Object {$_.href -eq "javascript:wait_for_wfe(0);"})
+	$Custom | Add-Member -type NoteProperty -Name "PM"  -Value  ($homepage | Where-Object {$_.href -eq "javascript:top.open_patmgr();"})
+	$Custom | Add-Member -type NoteProperty -Name "Back"  -Value  ($homepage | Where-Object {$_.href -eq "javascript:do_back();"})
+	$Custom | Add-Member -type NoteProperty -Name "Home"  -Value  ($homepage | Where-Object {$_.href -eq "javascript:top.open_home();"})
+	$Custom | Add-Member -type NoteProperty -Name "wfe"  -Value  ($homepage | Where-Object {$_.href -eq "javascript:top.open_wfe();"})
+	Return $Custom
+}
 
-$Shell = New-Object -COM Shell.Application
-$Shell.Windows()  ## Find the right one in the list
+Function Login-IDX {
+$idxhome = IDX-webpage 
+$iepid = (Get-Process | Where-Object { $_.MainWindowHandle -eq $idxhome.Hwnd }).Id
+AppActivate-Window -ID $iepid
+$IDX_Nav = IDX-NavButtons
+$IDX_Nav.login.click()
 
-$ie = $Shell.Windows().Item(1)  ## Grab the window
-$frames = $this1.Document.frames  
-$fr.document.getElementsByTagName("tr")  # $fr = $frames[0]  whree the name = topfr  (so first frame that has the tables embedded)  tr is table row,  tr[2] is the last
-.getElementsByTagName("td")  #reference the right one
-.getElementsByTagName("a")
-$a[0].click()
-$tr = $ie.document.frames[0].getElementsByTagName("tr") ; $td = $tr[2].getElementsByTagName("td") ;$a =  $td[1].getElementsByTagName("a");
-$a[0].click()  
+Send-Keys $idxCreds.user -enter 1 
+Send-Keys $idxCreds.Pass -enter 1 
+Send-Keys -enter 1
+Send-Keys "tst" -enter 1  # Replace TST with $practice 
 
-#this is the 1 liner:
-$idxhome.Document.frames[0].document.getElementsByTagName("tr")[2].getElementsByTagName("td")[1].getElementsByTagName("a")[0].click()
- $frames =$idxpage.Document.frames[1]
- $wfeapplet = $frames.document.getElementById("wfeapplet")
 
- $iepid = (Get-Process | Where-Object { $_.MainWindowHandle -eq $idxpage.Hwnd }).Id
- [Microsoft.VisualBasic.Interaction]::AppActivate($iepid);[System.Windows.Forms.SendKeys]::SendWait("$usname")
+ #open PM
+ $IDX_Nav.PM.click()
+
+ #use Patient-Manager to search by Acct number
+ Patient-Manager -patientAccountNumber $Referral_Report_Patient_Account_Number
+ #open Insurance tab
+ $idxhome.Document.frames[4].document.getElementById("radioIns").click()
+ #open Primary Insurance
+ ($idxhome.Document.frames[4].document.getElementsByTagName("a")| Where-Object {$_.href -like "javascript:openwindow_idet(1,'P');"} ).click()
+ #gets Popup window
+ $insurance_Window = ($Shell.Windows() | Where-Object { $_.LocationName -like "Group Management Edit Insurance Detail"})
+ # Not sure if needed yet
+ $iwinpid = (Get-Process | Where-Object { $_.MainWindowHandle -eq $insurance_Window.Hwnd }).Id
+ #Get Policy #
+ $policy_Value = $insurance_Window.Document.getElementsByName("policy1")[0].value   # should go to emed here and get PRI provider and Eligebility
+
+
+ #Pri Care Provider
+ # Name = pcp1     Search By Name
+ # Search Box Href = javascript:search(theform.pcp1,'pcpx'); Tag = a   Seach by Tag
+
+ # Opens Search Window 
+ ($insurance_Window.Document.getElementsByTagName("a")| Where-Object {$_.href -like "javascript:search(theform.pcp1,'pcpx');"} ).click() #Opens New Window  wsearch.cgi
+
+ 
+
+
+
+ # PCP name    ID = "pcpname1"   .. search by ID
+	$pcp_name  = (Get-Elementsby -webpage $insurance_Window -Type "ID"  -value ([ref] "pcpname1")).textContent
+	$pcp_value = (Get-Elementsby -webpage $insurance_Window -Type "name"  -value ([ref] "pcp1")).value
+
+ # Free Text
+ # Name = ft111  Free Test 1     Search By Name
+ # Name = ft121  Free Test 2     Search By Name
+ # Name = ft131  Free Test 3     Search By Name
+	$Free_Text1  = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl11") 
+	$Free_Text2  = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl21") 
+	$Free_Text3  = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl31") 
+}
+
+# Gets medE variables and puts them into an object
+Function GetMedE-Variables{
+	$Custom = @()
+	$Eligibility_Status = (((($benfits_Window.Document.frames)[0].document.getElementsByTagName("title"))[0].document.getElementsByTagName("tr") | Where-Object {$_.outertext -like "Eligibility Status:*"}).outerText).Remove(0,19)
+	$Custom | Add-Member -type NoteProperty -Name "Eligibility_Status"  -Value $Eligibility_Status
+	$PCP_Name = ((($benfits_Window.Document.frames)[0].document.getElementsByTagName("title"))[0].document.getElementsByTagName("tr") | Where-Object {$_.outertext -like "PCP Name*"}).outerText
+	$PCP_Name = ($pcp_name.Remove(0,44)).Replace("'" ,"")
+	$Custom | Add-Member -type NoteProperty -Name "PCP_Name"  -Value $PCP_Name
+	$PCP_Phone_Number = ((($benfits_Window.Document.frames)[0].document.getElementsByTagName("title"))[0].document.getElementsByTagName("tr") |  Where-Object {$_.outertext -like "PCP Phone Number*"}).outerText
+	$PCP_Phone_Number = ($PCP_Phone_Number.replace("PCP Phone Number PCP Phone Number is ","")).replace("'","")
+	$Custom | Add-Member -type NoteProperty -Name "PCP_Number"  -Value $trimmed
+	Return $Custom
+}
+
+
+# Search Window Function
+Function Search-Window {
+ Param([Parameter(Mandatory=$True)][String]$searchTerm, [Parameter(Mandatory=$true)][int]$number)
+	 $search_window =($Shell.Windows() | Where-Object { $_.LocationName -like "Group Management Constants Search"})
+	 #Search Text  Name:  search  #value = value to search by
+	 (Get-Elementsby -webpage $search_window -Type "Name" -value ([ref]"Search")).value = $searchTerm
+	 #Execute Search
+	 ((Get-Elementsby  -webpage $search_window -Type "TagName" -value ([ref]"input" )) | Where-Object{$_.type -like "submit"}).click()
+	 #search each row result for stuff
+	 $chooser_term = (($search_window.Document.getElementsByTagName("tr") | Where-Object {$_.innertext -like "*"+$searchTerm+"*" -and $_.innertext -like "*"+$number+"*" }).outerText)[0].Remove(3)
+	 #Select Appropriate Radio button to execute
+	((Get-Elementsby -webpage $search_window -Type "Name" -value ([ref]"chooser"))| Where-Object{$_.value -eq $chooser_term+"/R"}).click()
+}
+function Get-Elementsby {
+	Param([Parameter(Mandatory=$True)][object]$webpage, [Parameter(Mandatory=$True)][string]$Type, [Parameter(Mandatory=$False)][ref]$value)
+	$element = New-Object -ComObject  InternetExplorer.Application 
+	Switch($type){
+		{"ID" -or 1}{ $element = $webpage.document.getElementByID($value);break}
+		{"Name" -or 2}{$element = $webpage.document.getElementsByName($value);break}
+		{"TagName"-or 3}{$element = $webpage.document.getElementByTagName($value);break}
+	}
+	Return $element
+}
 
  #Emulate Keys to IDX website
  function Send-Keys {
  Param([Parameter(Mandatory=$false)][String]$key, [Parameter(Mandatory=$false)][int]$enter)
    AppActivate-Window($iepid)
    [System.Windows.Forms.SendKeys]::SendWait($key)
-   if($enter -ne 0)
-   {
-    [System.Windows.Forms.SendKeys]::SendWait("~")
-   }
+   if($enter -ne 0) {[System.Windows.Forms.SendKeys]::SendWait("~")}
  }
  #major function for IDX java website to emulate keystrokes
  Function AppActivate-Window {
@@ -127,6 +210,7 @@ $idxhome.Document.frames[0].document.getElementsByTagName("tr")[2].getElementsBy
  $dummypage = New-Webpage $idx 
  $Shell = New-Object -COM Shell.Application
  $idxhome = $Shell.Windows() | Where-object { $_.LocationURL -like "http://idx/gpmsweb/"}  ## Grab the window
+ Return $idxhome
  }
 
  #simple Get cred function
@@ -155,22 +239,22 @@ Input-creds -Credentials $emed_creds -WebPage $emed_page
 return $emed_page
 }
 
-# Function gets Elements on webpage by ID
+# Function gets Elements on webpage by ID  ######## OLD NEEDS CHANGED IN CODE  #########
 Function Get-ElementbyID{
-Param([Parameter(Mandatory=$TRUE)][string]$WebPage,[Parameter(Mandatory=$TRUE)][string]$ID)
-Return $webpage.Document.getElementById($ID)
+Param([Parameter(Mandatory=$TRUE)][object]$WebPage,[Parameter(Mandatory=$TRUE)][string]$ID)
+Return ($webpage.Document.getElementById($ID))
 }
 
 #Function Input's credentials into a website
 Function Input-creds{
-Param([Parameter(Mandatory=$TRUE)][pscustomObject]$Credentials,[Parameter(Mandatory=$TRUE)][string]$WebPage)
+Param([Parameter(Mandatory=$TRUE)][object]$Credentials,[Parameter(Mandatory=$TRUE)][object]$WebPage)
 (Get-ElementbyID -WebPage $WebPage -ID $emed_web_use).value = $Credentials.user
 (Get-ElementbyID -WebPage $WebPage -ID $emed_web_pass).value = $Credentials.pass
 }
 
 #function searches Emed website
 Function Search-Emed {
-Param([Parameter(Mandatory=$TRUE)][string]$WebPage,[Parameter(Mandatory=$TRUE)][string]$Search)
+Param([Parameter(Mandatory=$TRUE)][object]$WebPage,[Parameter(Mandatory=$TRUE)][string]$Search)
 (Get-ElementbyID -WebPage $WebPage -ID $emed_web_SubID).value = $Search 
 (Get-ElementbyID -WebPage $WebPage -ID $emed_web_Submit).click() 
 }
@@ -193,7 +277,7 @@ While($again -eq 0){
                 Get Referral         (1)
                 Login Centricity     (2)
                 Login medEconnect    (3)
-                xx List              (4)
+                Enter Your Practice  (4)
                 xx ist               (5)"
         $input =  Read-Host "Input Selection:"
         Switch ($input){
@@ -209,24 +293,26 @@ Return $return
 }
 Function Get-NetDrives{
 $result = get-wmiobject win32_mappedLogicalDisk -computername $env:computername | select caption, providername
-Return $esult
+Return $result
 }
 
 
-
-Function ExportWSToCSV ($input_File, $output_Location )
+#Gets the .xls and converts to .csv 
+Function ExportWSToCSV ($RR_FileName_NO_extention, $Output_Folder_Location )
 {
+	$myfile = $Output_Folder_Location + $RR_FileName_NO_extention + ".xls"
     $E = New-Object -ComObject Excel.Application
-    $E.Visible = $false
-    $E.DisplayAlerts = $false
-    $wb = $E.Workbooks.Open($input_File)
-    foreach ($ws in $wb.Worksheets)
-    {
-        $n = "Referral_Report" + "_" + $ws.Name
-        $ws.SaveAs($output_Location + $n + ".csv", 6)
-    }
+    $wb = $E.Workbooks.Open($myfile)
+	$wb.Worksheets.Item(1)._SaveAs($Output_Folder_Location + $RR_FileName_NO_extention +".csv", 6)
     $E.Quit()
 }
+
+<#
+For later use in abstracting Header information
+
+$myheader = (Import-Csv -Path $directory +"\" +"Referral_Report.CSV")[0] | Get-member | Where-Object {$_.memberType -like "NoteProperty"} |Select-Object Name
+
+#>
 
 
 Try{
