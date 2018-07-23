@@ -28,7 +28,7 @@ $local_Ref_Rep_Dir = "$home\desktop\Local Referral Report"
 $ref_Rep_name = "Referral_Report.xls"
 $rrl = "\\Analyzer\Analyzer\Snapshots\cos\Excel\daily\Referral_Report.xls"  
 $Full_header = "Location","Count","Provider","Appt Date","Enc","Acct #"," ","Patient","Entered by","Insurance", "Error"
-$Trunc_header = $Full_header = "Location","Count","Provider","Appt Date","Enc","Acct #","Patient","Entered by","Insurance", "Error"
+$Trunc_header  = "Location","Count","Provider","Appt Date","Enc","Acct #","Patient","Entered by","Insurance", "Error"
 $occreds = Get-Cred -Whatfor "OC Credentials"
 $idxCreds = Get-Cred  -Whatfor "Centricity Credentials"
 $emedCreds = Get-Cred  -Whatfor "oc.emedeconnect credentials"
@@ -42,19 +42,21 @@ if(!(Test-Path -Path "$home\desktop\Local Referral Report")){
 		New-Item -Path $home\desktop\ -Name "Local Referral Report" -ItemType dir
 	}
 Start-BitsTransfer -Source $rrl -Credential (Get-Credential) -Destination "$home\desktop\Local Referral Report"
-
+ExportWStoCSV -RR_FileName_NO_extention "Referral_Report" -Output_Folder_Location "$home\desktop\Local Referral Report\"
 # Consolidates and completes each CSV object
 function Add-Data{
 Param(
 [Parameter(Mandatory=$true)][PSObject]$ReturnObject, 
 [Parameter(Mandatory=$true)][int]$counter,
 [Parameter(Mandatory=$true)][Object]$Dataobject)
-$ReturnObject | Add-Member -type NoteProperty -Name $header[$counter] -Value $DataObject."$($header[$counter])"
+$ReturnObject | Add-Member -type NoteProperty -Name $Trunc_header[$counter] -Value $DataObject."$($Trunc_header[$counter])"
 }
 
 #  dynamically  name a variable with a variable === $value=$NetworkInfo."$($_.Name)"
 function Format-the-fucking-data {
-$shitCSV = (Import-Csv $rrl -Header $Full_header | Select-Object $Trunc_header | Select-Object -Skip 1)
+
+$shitCSV = (Import-Csv "$home\desktop\Local Referral Report\Referral_Report.csv" -Header $Full_header | Select-Object $Trunc_header | Select-Object -Skip 1)
+$counter = 0
 foreach( $line in $shitCSV){
   $temp = New-Object PSObject
   $indexer = 0
@@ -66,6 +68,8 @@ foreach( $line in $shitCSV){
    }
   $FixedCSV += $temp
   $last = $temp
+  $counter ++ 
+  Write-Progress -Activity "Building Data" -Status "Progress" -PercentComplete (($counter / $shitCSV.Count)*100 )
  }
 }
 
@@ -110,9 +114,27 @@ Send-Keys $idxCreds.Pass -enter 1
 Send-Keys -enter 1
 Send-Keys "tst" -enter 1  # Replace TST with $practice 
 
-
  #open PM
  $IDX_Nav.PM.click()
+
+ Format-the-fucking-data  #Fixes the CSV
+ $mydata = SelectData-byClinic -DataObject $fixedCSV -SearchName (Get-Input) -Field (Get-Input)  #Fetches the Data we want to work on
+	#loops through the data to do stuff here
+	Foreach($This_Data in $mydata){
+
+		Patient-Manager -patientAccountNumber ($This_Data.'Acct #')
+
+
+		 Write-Host "Would you like to Continue to the next patient?"
+		 $continue = (Read-Host "Input (y)es or (n)o:").tolower()
+         If($continue -eq "y"){
+			  $IDX_Nav.Back.click()
+		 }
+		 Else {break} 
+	}
+
+
+
 
  #use Patient-Manager to search by Acct number
  Patient-Manager -patientAccountNumber $Referral_Report_Patient_Account_Number
@@ -232,10 +254,9 @@ Return $creds
 
 #main OC med function
 Function ocemed-page{
+Param([Parameter(Mandatory=$TRUE)][object]$Credentials)
 $emed_page =New-Webpage $ocemed
-Write-Output "Get Emed Credentials"
-$emed_creds = Get-Cred
-Input-creds -Credentials $emed_creds -WebPage $emed_page
+Input-creds -Credentials $Credentials -WebPage $emed_page
 return $emed_page
 }
 
