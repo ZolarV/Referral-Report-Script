@@ -1,13 +1,38 @@
-#  Author: Michael Curtis
-#  Version:  .8
-#  Date  7/16/2018
-#  Purpose:  Using Daily Referral Report, check Primary Care Provider in centricity matches PRI in OCeMedconnect
-#            Checks for eligability and current date.  
-#            If !eligable or current date_month == this_month  then do nothing
-#            Else Match names and update Current Date field  with todays date.
-#
-#
-#
+<#  Author: Michael Curtis
+	Version:  .8
+    Date  7/16/2018
+    Purpose:  Using Daily Referral Report, check Primary Care Provider in centricity matches PRI in OCeMedconnect
+              Checks for eligability and current date.  
+              If !eligable or current date_month == this_month  then do nothing
+              Else Match names and update Current Date field  with todays date.
+
+	Primary Logic:
+		Step 1: Get .XLS from Directory Using BITS 
+			A:  Test netpath and map Analyzer drive if need be
+			B:  Create local location and download .XLS to local
+		Step 2: Convert .XLS to .CSV  using  ExportWStoCSV function
+			A:  Save export to Local folder
+		Step 3: Fix CSV data by using  Format-The-Fucking-Data Function   ###### NOTICE ##### Change the function name.  
+			A:	Note: Colsolidate CSV done by calling Add-Data for pscustomobject.  Need to abstract a tad more, currently hardcoded to use $header[$index]
+		Step 4: Filter fixedCSV data using user input for Field to search and searchterm  using SelectData-ByClinic   ###  Bad name rename
+		Step 5: Login to IDX  
+		Step 6: Login to oc.medEconnect.com
+		Step 7: Using Patient account number from Filtered FixCSV  search IDX 
+		Step 8: Go to Insurance tab
+			A:  If Date (month) in Free Text Box is same as current month , SKIP
+		Step 9: Get subscriber ID 
+			A:	using Subscriber ID, Search oc.medeconnect.com 
+		Step 10: Get Eligibility status, PRI, and PRI number from MedEConnect
+		Step 11: Logic Check IF ELIGIBILE  CONTINUE  ELSE EXIT PATIENT
+		Step 12: Match PRI from MedEConnect with PRI in IDX
+		Step 13: Open IDX PRI Search Box, Search PRI name 
+			A:	 Using PRI name and PRI number Filter through Search and Select Radio button
+		Step 14: Update Checked date in Free Text field
+			FORK: Build Patient Referral in IDX   (NEED TO DO)
+		Step 15: NEXT PATIENT!
+		
+
+#>
 
 # Constant defines
 # Web Pages
@@ -22,6 +47,10 @@ $emed_web_Submit = "tabContainer_tabSearch_btnHSubmit"
 
 #HighScope Constants
 $fixedCSV = @()
+$CurrentDate = Get-Date
+$Current_Month =$CurrentDate.Month
+$Current_Month_alt = Get-Date -Format MMM
+$IDX_Nav = @()
 
 # Referral_Report Location xls  on COS
 $local_Ref_Rep_Dir = "$home\desktop\Local Referral Report"
@@ -43,6 +72,7 @@ if(!(Test-Path -Path "$home\desktop\Local Referral Report")){
 	}
 Start-BitsTransfer -Source $rrl -Credential (Get-Credential) -Destination "$home\desktop\Local Referral Report"
 ExportWStoCSV -RR_FileName_NO_extention "Referral_Report" -Output_Folder_Location "$home\desktop\Local Referral Report\"
+
 # Consolidates and completes each CSV object
 function Add-Data{
 Param(
@@ -54,7 +84,6 @@ $ReturnObject | Add-Member -type NoteProperty -Name $Trunc_header[$counter] -Val
 
 #  dynamically  name a variable with a variable === $value=$NetworkInfo."$($_.Name)"
 function Format-the-fucking-data {
-
 $shitCSV = (Import-Csv "$home\desktop\Local Referral Report\Referral_Report.csv" -Header $Full_header | Select-Object $Trunc_header | Select-Object -Skip 1)
 $counter = 0
 foreach( $line in $shitCSV){
@@ -69,10 +98,12 @@ foreach( $line in $shitCSV){
   $FixedCSV += $temp
   $last = $temp
   $counter ++ 
+	#neat little progress bar for the functions that take longer
   Write-Progress -Activity "Building Data" -Status "Progress" -PercentComplete (($counter / $shitCSV.Count)*100 )
  }
 }
 
+# Returns selected data from the csv object.    Supply both field to search and the search term
 function SelectData-byClinic {
 Param([Parameter(Mandatory=$TRUE)][Object]$DataObject, [Parameter(Mandatory=$TRUE)][string]$SearchName, [Parameter(Mandatory=$TRUE)][string]$Field)
 $filtered = $DataObject | Where-Object {$_."$Field" -like $SearchName  } 
@@ -90,6 +121,7 @@ Param([Parameter(Mandatory=$TRUE)][String]$page, [Parameter(Mandatory=$false)][i
 return $ie
 }
 
+# Returns Homepage Nav function buttons.  instead of trying to get them a billion times. 
 Function IDX-NavButtons{
 	$Custom = New-Object psobject
 	$homepage  =  $idxhome.Document.frames[0].document.getElementsByTagName("a")
@@ -102,17 +134,19 @@ Function IDX-NavButtons{
 	Return $Custom
 }
 
+ # Main IDX Patient Logic.  Need to rebuild better. 
 Function Login-IDX {
-$idxhome = IDX-webpage 
-$iepid = (Get-Process | Where-Object { $_.MainWindowHandle -eq $idxhome.Hwnd }).Id
-AppActivate-Window -ID $iepid
-$IDX_Nav = IDX-NavButtons
-$IDX_Nav.login.click()
-
-Send-Keys $idxCreds.user -enter 1 
-Send-Keys $idxCreds.Pass -enter 1 
-Send-Keys -enter 1
-Send-Keys "tst" -enter 1  # Replace TST with $practice 
+	Param([Parameter(Mandatory=$true)][String]$Practice)
+	$idxhome = IDX-webpage 
+	$iepid = (Get-Process | Where-Object { $_.MainWindowHandle -eq $idxhome.Hwnd }).Id
+	AppActivate-Window -ID $iepid
+	$IDX_Nav = IDX-NavButtons
+	$IDX_Nav.login.click()
+	Send-Keys $idxCreds.user -enter 1 
+	Send-Keys $idxCreds.Pass -enter 1 
+	Send-Keys -enter 1
+	Send-Keys $practice -enter 1 
+	}
 
  #open PM
  $IDX_Nav.PM.click()
@@ -122,7 +156,16 @@ Send-Keys "tst" -enter 1  # Replace TST with $practice
 	#loops through the data to do stuff here
 	Foreach($This_Data in $mydata){
 
-		Patient-Manager -patientAccountNumber ($This_Data.'Acct #')
+		Patient-Manager -patientAccountNumber ($This_Data.'Acct #')  # figure out a way to filter data to only things that need done.  Currently only filtering data on one type
+		 <# PseudoDo
+		  1: Do you want to filter by days?  
+					A:Maxday = today
+					B:MinDay = at least 1
+					C:data using mydata from Selected data.  
+		2:  Pop in patient number in Patiend-Manager,  Get Subscriber Number for Search-Med
+
+
+		#>
 
 
 		 Write-Host "Would you like to Continue to the next patient?"
@@ -172,7 +215,7 @@ Send-Keys "tst" -enter 1  # Replace TST with $practice
 	$Free_Text1  = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl11") 
 	$Free_Text2  = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl21") 
 	$Free_Text3  = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl31") 
-}
+
 
 # Gets medE variables and puts them into an object
 Function GetMedE-Variables{
@@ -202,6 +245,8 @@ Function Search-Window {
 	 #Select Appropriate Radio button to execute
 	((Get-Elementsby -webpage $search_window -Type "Name" -value ([ref]"chooser"))| Where-Object{$_.value -eq $chooser_term+"/R"}).click()
 }
+
+# New Elements function
 function Get-Elementsby {
 	Param([Parameter(Mandatory=$True)][object]$webpage, [Parameter(Mandatory=$True)][string]$Type, [Parameter(Mandatory=$False)][ref]$value)
 	$element = New-Object -ComObject  InternetExplorer.Application 
@@ -213,19 +258,19 @@ function Get-Elementsby {
 	Return $element
 }
 
- #Emulate Keys to IDX website
+ # Emulate Keys to IDX website
  function Send-Keys {
  Param([Parameter(Mandatory=$false)][String]$key, [Parameter(Mandatory=$false)][int]$enter)
    AppActivate-Window($iepid)
    [System.Windows.Forms.SendKeys]::SendWait($key)
    if($enter -ne 0) {[System.Windows.Forms.SendKeys]::SendWait("~")}
  }
+
  #major function for IDX java website to emulate keystrokes
  Function AppActivate-Window {
  Param([Parameter(Mandatory=$TRUE)][int]$ID)
   [Microsoft.VisualBasic.Interaction]::AppActivate($ID);
  }
- $idxpage.Document.frames[0].document.getElementsByTagName("tr")[2].getElementsByTagName("td")[1].getElementsByTagName("a")[2].click()
 
  # Function gets IDX webpage and recaptures it after java breaks it
  Function IDX-webpage{
@@ -249,8 +294,6 @@ $Creds = @([pscustomObject] @{
         })
 Return $creds
 }
-
-
 
 #main OC med function
 Function ocemed-page{
@@ -350,8 +393,8 @@ $_
 
 
 
-# Old unfinished code for parsing PDF
-<#
+<# Old unfinished code for parsing PDF
+
 $ItextPath = 'C:\Users\Pride\Desktop\Hickory Coding Project\itextsharp.dll'
 # Add type for .DLL usage in PDF parsing
  Add-Type -Path $ItextPATH

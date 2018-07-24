@@ -1,0 +1,10 @@
+{
+  "version": "0.2.1",
+  "tasks": [
+    {
+      "taskName": "task-Parse",
+      "appliesTo": "Parse.ps1",
+      "type": "launch"
+    }
+  ]
+}
