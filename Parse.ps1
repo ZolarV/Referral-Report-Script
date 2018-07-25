@@ -50,12 +50,12 @@ $fixedCSV = @()
 $CurrentDate = Get-Date
 $Current_Month = $CurrentDate.Month
 $Current_Month_alt = Get-Date -Format MMM
-$IDX_Nav = @()
+$IDX_Nav = New-Object PSObject
 
 # Referral_Report Location xls  on COS
-$local_Ref_Rep_Dir = "$home\desktop\Local Referral Report"
+$local_Ref_Rep_Dir = "$home\desktop\Local Referral Report\"
 $ref_Rep_name = "Referral_Report.xls"
-$rrl = "\\Analyzer\Analyzer\Snapshots\cos\Excel\daily\Referral_Report.xls"  
+$rrl = "\\Analyzer\Analyzer\Snapshots\cos\Excel\daily\Referral_Report.xls"
 $Full_header = "Location", "Count", "Provider", "Appt Date", "Enc", "Acct #", " ", "Patient", "Entered by", "Insurance", "Error"
 $Trunc_header = "Location", "Count", "Provider", "Appt Date", "Enc", "Acct #", "Patient", "Entered by", "Insurance", "Error"
 $occreds = Get-Cred -Whatfor "OC Credentials"
@@ -67,19 +67,26 @@ $emedCreds = Get-Cred  -Whatfor "oc.emedeconnect credentials"
 [void] [System.Reflection.Assembly]::LoadWithPartialName("'Microsoft.VisualBasic")
 
 # Creates Local Referral report folder and downloads current report
-if (!(Test-Path -Path "$home\desktop\Local Referral Report")) {
+if (!(Test-Path -Path $local_Ref_Rep_Dir)) {
     New-Item -Path $home\desktop\ -Name "Local Referral Report" -ItemType dir
 }
-Start-BitsTransfer -Source $rrl -Credential (Get-Credential) -Destination "$home\desktop\Local Referral Report"
-ExportWStoCSV -RR_FileName_NO_extention "Referral_Report" -Output_Folder_Location "$home\desktop\Local Referral Report\"
+
 
 # Consolidates and completes each CSV object
 function Add-Data {
     Param(
-        [Parameter(Mandatory = $true)][PSObject]$ReturnObject, 
+        [Parameter(Mandatory = $true)][PSObject]$ReturnObject,
         [Parameter(Mandatory = $true)][int]$counter,
         [Parameter(Mandatory = $true)][Object]$Dataobject)
-    $ReturnObject | Add-Member -type NoteProperty -Name $Trunc_header[$counter] -Value $DataObject."$($Trunc_header[$counter])"
+        if( $Trunc_header[$counter] -eq "Appt Date"){
+        
+            $mydate = [dateTime]::Parse($DataObject."$($Trunc_header[$counter])")
+            $ReturnObject | Add-Member -type NoteProperty -Name $Trunc_header[$counter] -Value $mydate
+        }
+        Else{
+            $ReturnObject | Add-Member -type NoteProperty -Name $Trunc_header[$counter] -Value $DataObject."$($Trunc_header[$counter])"
+        }
+
 }
 
 #  dynamically  name a variable with a variable === $value=$NetworkInfo."$($_.Name)"
@@ -97,7 +104,7 @@ function Format-the-fucking-data {
         }
         $FixedCSV += $temp
         $last = $temp
-        $counter ++ 
+        $counter ++
         #neat little progress bar for the functions that take longer
         Write-Progress -Activity "Building Data" -Status "Progress" -PercentComplete (($counter / $shitCSV.Count) * 100 )
     }
@@ -105,8 +112,13 @@ function Format-the-fucking-data {
 
 # Returns selected data from the csv object.    Supply both field to search and the search term
 function SelectData-byClinic {
-    Param([Parameter(Mandatory = $TRUE)][Object]$DataObject, [Parameter(Mandatory = $TRUE)][string]$SearchName, [Parameter(Mandatory = $TRUE)][string]$Field)
-    $filtered = $DataObject | Where-Object {$_."$Field" -like $SearchName  } 
+    Param([Parameter(Mandatory = $TRUE)][Object]$DataObject, [Parameter(Mandatory = $TRUE)][ref]$SearchName, [Parameter(Mandatory = $TRUE)][string]$Field)
+    if($SearchName -eq "Appt Date"){
+        $filtered = $DataObject | Where-Object {$_."$Field" -ge $SearchName[0]  }
+        $filtered = $filtered | Where-Object {$_."$Field" -le $SearchName[1]  }
+    }
+    else {
+    $filtered = $DataObject | Where-Object {$_."$Field" -like $SearchName  }}
     return $Filtered
 }
 
@@ -128,6 +140,7 @@ Function GetMedE-Variables {
 
 # Search Window Function
 Function Search-Window {
+    $Shell = New-Object -COM Shell.Application
     Param([Parameter(Mandatory = $True)][String]$searchTerm, [Parameter(Mandatory = $true)][int]$number)
     $search_window = ($Shell.Windows() | Where-Object { $_.LocationName -like "Group Management Constants Search"})
     #Search Text  Name:  search  #value = value to search by
@@ -143,7 +156,7 @@ Function Search-Window {
 # New Elements function
 function Get-Elementsby {
     Param([Parameter(Mandatory = $True)][object]$webpage, [Parameter(Mandatory = $True)][string]$Type, [Parameter(Mandatory = $False)][ref]$value)
-    $element = New-Object -ComObject  InternetExplorer.Application 
+    $element = New-Object -ComObject  InternetExplorer.Application
     Switch ($type) {
         {"ID" -or 1} { $element = $webpage.document.getElementByID($value); break}
         {"Name" -or 2} {$element = $webpage.document.getElementsByName($value); break}
@@ -168,7 +181,7 @@ Function AppActivate-Window {
 
 # Function gets IDX webpage and recaptures it after java breaks it
 Function IDX-webpage {
-    $dummypage = New-Webpage $idx 
+    $dummypage = New-Webpage $idx
     $Shell = New-Object -COM Shell.Application
     $idxhome = $Shell.Windows() | Where-object { $_.LocationURL -like "http://idx/gpmsweb/"}  ## Grab the window
     Return $idxhome
@@ -182,8 +195,8 @@ Function Get-Cred {
     $User = Read-Host 'Enter Username'
     $pass = Read-Host 'Enter Password'
     $Creds = @([pscustomObject] @{
-            User = $User 
-            Pass = $Pass 
+            User = $User
+            Pass = $Pass
         })
     Return $creds
 }
@@ -212,8 +225,8 @@ Function Input-creds {
 #function searches Emed website
 Function Search-Emed {
     Param([Parameter(Mandatory = $TRUE)][object]$WebPage, [Parameter(Mandatory = $TRUE)][string]$Search)
-    (Get-ElementbyID -WebPage $WebPage -ID $emed_web_SubID).value = $Search 
-    (Get-ElementbyID -WebPage $WebPage -ID $emed_web_Submit).click() 
+    (Get-ElementbyID -WebPage $WebPage -ID $emed_web_SubID).value = $Search
+    (Get-ElementbyID -WebPage $WebPage -ID $emed_web_Submit).click()
 }
 
 #function searches IDX PM by patient account number
@@ -223,20 +236,18 @@ function Patient-Manager {
     $idxhome.document.frames[4].document.getElementsByTagName("table")[1].getElementsByTagName("td")[27].getElementsByTagName("input")[0].click() 
 }
 
-
-
 #Stupid function
 Function New-Webpage {
     Param([Parameter(Mandatory = $TRUE)][String]$page, [Parameter(Mandatory = $false)][int]$vis)
-    $ie = new-object -com InternetExplorer.Application 
-    if ($vis -eq 0) { $ie.visible = $true} 
-    else {$ie.visible = $false} 
+    $ie = new-object -com InternetExplorer.Application
+    if ($vis -eq 0) { $ie.visible = $true}
+    else {$ie.visible = $false}
     $ie.navigate2($page)
-    while ($ie.busy) {sleep 3} 
+    while ($ie.busy) {Start-Sleep 3}
     return $ie
 }
 
-# Returns Homepage Nav function buttons.  instead of trying to get them a billion times. 
+# Returns Homepage Nav function buttons.  instead of trying to get them a billion times.
 Function IDX-NavButtons {
     $Custom = New-Object psobject
     $homepage = $idxhome.Document.frames[0].document.getElementsByTagName("a")
@@ -250,7 +261,7 @@ Function IDX-NavButtons {
 }
 
 
-#Gets the .xls and converts to .csv 
+#Gets the .xls and converts to .csv
 Function ExportWSToCSV ($RR_FileName_NO_extention, $Output_Folder_Location ) {
     $myfile = $Output_Folder_Location + $RR_FileName_NO_extention + ".xls"
     $E = New-Object -ComObject Excel.Application
@@ -259,24 +270,84 @@ Function ExportWSToCSV ($RR_FileName_NO_extention, $Output_Folder_Location ) {
     $E.Quit()
 }
 
-# Main IDX Patient Logic.  Need to rebuild better. 
+# Main IDX Patient Logic.  Need to rebuild better.
 Function Login-IDX {
     Param([Parameter(Mandatory = $true)][String]$Practice)
-    $idxhome = IDX-webpage 
+    $idxhome = IDX-webpage
     $iepid = (Get-Process | Where-Object { $_.MainWindowHandle -eq $idxhome.Hwnd }).Id
     AppActivate-Window -ID $iepid
     $IDX_Nav = IDX-NavButtons
     $IDX_Nav.login.click()
-    Send-Keys $idxCreds.user -enter 1 
-    Send-Keys $idxCreds.Pass -enter 1 
+    Send-Keys $idxCreds.user -enter 1
+    Send-Keys $idxCreds.Pass -enter 1
     Send-Keys -enter 1
-    Send-Keys $practice -enter 1 
+    Send-Keys $practice -enter 1
 }
 
-#open PM
-$IDX_Nav.PM.click()
 
-Format-the-fucking-data  #Fixes the CSV
+
+Write-Host "Welcome to the Referral Automation Application"
+    $again = 0
+    While ($again -eq 0) {
+        Write-Host "What would you like to do?"
+        Write-host "Options:
+                Get Referral_Report       (1)
+                Run live Automation       (2)
+                Run test Automation       (3)
+                xx ist                    (5)"
+        $input = Read-Host "Input Selection:"
+        Switch ($input) {
+            1 { 
+                ############ Possibly test netpath first? ###########
+                 Write-Host "Getting Referral Report and Stagin to $Home\desktop\Local Referral Report\"  # Starts Referral Report process,  Will rename old to _old If exist
+                 Get-ChildItem -path "$home\Desktop\Local Referral Report\*" -include *.pdf , *.xls , *.csv | Rename-Item -NewName {$_.name -replace $_.basename , ($_.basename +"_old") }
+                # Starts Bits Transfer of file
+                 Start-BitsTransfer -Source $rrl -Destination "$home\desktop\Local Referral Report\"
+                # Converts .xls to usable CSV
+                ExportWStoCSV -RR_FileName_NO_extention "Referral_Report" -Output_Folder_Location "$home\desktop\Local Referral Report\"
+                ; break}
+            2 { 
+                # Build import CSV into pscustom and reformat data
+                Format-the-fucking-data  #Fixes the CSV  #also change name..
+                # Logs into Centricity and captures Webpage Nav buttons in GLOBAL variable $IDX_NAV
+                $practice = Read-Host -Prompt "Please Enter Practice. E.G: COS, TST ..."
+                Login-IDX -Practice $practice
+                #open PM
+                $IDX_Nav.PM.click()
+                #build filter variable.   as PS custom object.  multimember use each memeber as a method for itterating through and filtering sequentially
+                $Field_Array = @()
+                $Want_To_Filter = 0
+                Write-Host "Select each filter you wish to apply"
+                Write-Host "Note: Fields are filtered by the FIFO method.  First in first out"
+                Write-Host "Available fields:
+                            Location        Count
+                            Provider        Appt Date
+                            Enc             Acct #
+                            Patient         Entered by
+                            Insurance       Error"
+                Write-host "E.G: Location Provider Date "
+                Write-host "BY FIFO Location is filtered first, then Provider off of that data"
+                While($Want_To_Filter -eq 0){
+                    $Field_Array +=   Read-Host -Prompt "Enter Field exactly as show above"
+                    $Want_To_Filter = Read-Host -Prompt "Do you want to add another Filter?  0 = yes 1 = no"
+                 }
+                foreach($filter in $Field_Array){
+                $searchterm = Read-Host "Enter search term for field: $filter "
+                if($filter -eq "Appt Date") {
+                    $searchterm = @()
+                    $searchterm += Read-Host "Enter Start Date for Field: $filter "
+                    $searchterm += Read-Host "Enter End Date for Field: $filter "
+                 }
+                $mydata = SelectData-byClinic -DataObject $fixedCSV -SearchName $searchterm -Field $filter   #Fetches the Data we want to work on
+                }
+                ;break}
+        }
+    }
+
+
+
+
+
 $mydata = SelectData-byClinic -DataObject $fixedCSV -SearchName (Get-Input) -Field (Get-Input)  #Fetches the Data we want to work on
 #loops through the data to do stuff here
 Foreach ($This_Data in $mydata) {
@@ -337,37 +408,23 @@ $pcp_value = (Get-Elementsby -webpage $insurance_Window -Type "name"  -value ([r
 # Name = ft111  Free Test 1     Search By Name
 # Name = ft121  Free Test 2     Search By Name
 # Name = ft131  Free Test 3     Search By Name
-$Free_Text1 = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl11") 
-$Free_Text2 = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl21") 
-$Free_Text3 = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl31") 
+$Free_Text1 = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl11")
+$Free_Text2 = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl21")
+$Free_Text3 = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl31")
 
 
 
-Function Main-Main {
-    Write-Host "Welcome to the Referral Automation Application"
-    $again = 0
-    While ($again -eq 0) {
-        Write-Host "What would you like to do?"
-        Write-host "Options:
-                Get Referral         (1)
-                Login Centricity     (2)
-                Login medEconnect    (3)
-                Enter Your Practice  (4)
-                xx ist               (5)"
-        $input = Read-Host "Input Selection:"
-        Switch ($input) {
-            1 {  ; break}
-        }
-    }
-}
+
+    
+
 Function Test-VarSet {
 }
 Function Test-Variable($vartest) {
     $return = if ($vartest) {$true} else {$false}
-    Return $return 
+    Return $return
 }
 Function Get-NetDrives {
-    $result = get-wmiobject win32_mappedLogicalDisk -computername $env:computername | select caption, providername
+    $result = get-wmiobject win32_mappedLogicalDisk -computername $env:computername | Select-Object caption, providername
     Return $result
 }
 
