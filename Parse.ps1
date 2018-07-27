@@ -5,7 +5,7 @@
               Checks for eligability and current date.  
               If !eligable or current date_month == this_month  then do nothing
               Else Match names and update Current Date field  with todays date.
-
+              How it feels to chew 5 gum https://www.youtube.com/watch?v=CqaAs_3azSs  || http://www.infinitelooper.com/?v=CqaAs_3azSs&p=n
 	Primary Logic:
 		Step 1: Get .XLS from Directory Using BITS 
 			A:  Test netpath and map Analyzer drive if need be
@@ -48,8 +48,6 @@ $emed_web_Submit = "tabContainer_tabSearch_btnHSubmit"
 #HighScope Constants
 $fixedCSV = @()
 $CurrentDate = Get-Date
-$Current_Month = $CurrentDate.Month
-$Current_Month_alt = Get-Date -Format MMM
 $IDX_Nav = New-Object PSObject
 
 # Referral_Report Location xls  on COS
@@ -292,21 +290,24 @@ Write-Host "Welcome to the Referral Automation Application"
                 Get Referral_Report       (1)
                 Run live Automation       (2)
                 Run test Automation       (3)
-                xx ist                    (5)"
+                Exit                      (5)"
         $input = Read-Host "Input Selection:"
         Switch ($input) {
             1 {
+                $again =0
                 ############ Possibly test netpath first? ###########
-                 Write-Host "Getting Referral Report and Stagin to $Home\desktop\Local Referral Report\"  # Starts Referral Report process,  Will rename old to _old If exist
+                 Write-Host "Getting Referral Report and staging to $local_Ref_Rep_Dir"  # Starts Referral Report process,  Will rename old to _old If exist
                  Get-ChildItem -path "$home\Desktop\Local Referral Report\*" -include *.pdf , *.xls , *.csv | Rename-Item -NewName {$_.name -replace $_.basename , ($_.basename +"_old") }
                 # Starts Bits Transfer of file
-                 Start-BitsTransfer -Source $rrl -Destination "$home\desktop\Local Referral Report\"
+                 Start-BitsTransfer -Source $rrl -Destination $local_Ref_Rep_Dir
                 # Converts .xls to usable CSV
-                ExportWStoCSV -RR_FileName_NO_extention "Referral_Report" -Output_Folder_Location "$home\desktop\Local Referral Report\"
-                ; break}
+                ExportWStoCSV -RR_FileName_NO_extention "Referral_Report" -Output_Folder_Location $local_Ref_Rep_Dir
+                 ; break}
             2 {
+                $again =0
                 # Build import CSV into pscustom and reformat data
                 Format-the-fucking-data  #Fixes the CSV  #also change name..
+                $mydata = $fixedCSV # initializes unfiltered data 
                 # Logs into Centricity and captures Webpage Nav buttons in GLOBAL variable $IDX_NAV
                 $practice = Read-Host -Prompt "Please Enter Practice. E.G: COS, TST ..."
                 Login-IDX -Practice $practice
@@ -332,17 +333,26 @@ Write-Host "Welcome to the Referral Automation Application"
                 foreach($filter in $Field_Array){
                 $searchterm = Read-Host "Enter search term for field: $filter "
                 if($filter -eq "Appt Date") {
+                    Write-Host "Format for Date mm/dd/yyyy  E.G: 8/17/2018"
                     $searchterm = @()
-                    $searchterm += Read-Host "Enter Start Date for Field: $filter "
-                    $searchterm += Read-Host "Enter End Date for Field: $filter "
+                    $searchterm += ([datetime]::Parse((Read-Host "Enter Start Date for Field: $filter ")))
+                    $searchterm += ([datetime]::Parse((Read-Host "Enter End Date for Field: $filter ")))
                  }
-                $mydata = SelectData-byClinic -DataObject $fixedCSV -SearchName $searchterm -Field $filter   #Fetches the Data we want to work on
+                $mydata = SelectData-byClinic -DataObject $mydata -SearchName $searchterm -Field $filter   #Fetches the Data we want to work on
                 }
+                # Now lets use the data selected in $mydata
+                # Login to oc.medEconnect.com
+                $oc_medE_page = ocemed-page -Credentials $emedCreds
+
+                Foreach ($This_Data in $mydata) {
+                    Patient-Manager -patientAccountNumber ($This_Data.'Acct #')
+                    Write-host "Do you want to search this Patient Record?"
+                    
                 ;break}
         }
     }
 
-
+}
 
 
 
@@ -369,7 +379,6 @@ Foreach ($This_Data in $mydata) {
     }
     Else {break} 
 }
-
 
 
 
