@@ -79,9 +79,7 @@ function Add-Data {
         [Parameter(Mandatory = $true)][int]$counter,
         [Parameter(Mandatory = $true)][Object]$Dataobject)
         if( $Trunc_header[$counter] -eq "Appt Date"){
-        
-            $mydate = [dateTime]::Parse($DataObject."$($Trunc_header[$counter])")
-            $ReturnObject | Add-Member -type NoteProperty -Name $Trunc_header[$counter] -Value $mydate
+            $ReturnObject | Add-Member -type NoteProperty -Name $Trunc_header[$counter] -Value [dateTime]::Parse($DataObject."$($Trunc_header[$counter])")
         }
         Else{
             $ReturnObject | Add-Member -type NoteProperty -Name $Trunc_header[$counter] -Value $DataObject."$($Trunc_header[$counter])"
@@ -96,7 +94,7 @@ function Format-the-fucking-data {
     foreach ( $line in $shitCSV) {
         $temp = New-Object PSObject
         $indexer = 0
-        $line.PSObject.Properties | ForEach-Object { 
+        $line.PSObject.Properties | ForEach-Object {
             if ($_.value)
             { Add-Data -ReturnObject $temp -counter $indexer -Dataobject $line}
             else { Add-Data -ReturnObject $temp -counter $indexer  -Dataobject $last  }
@@ -113,12 +111,12 @@ function Format-the-fucking-data {
 # Returns selected data from the csv object.    Supply both field to search and the search term
 function SelectData-byClinic {
     Param([Parameter(Mandatory = $TRUE)][Object]$DataObject, [Parameter(Mandatory = $TRUE)][ref]$SearchName, [Parameter(Mandatory = $TRUE)][string]$Field)
-    if($SearchName -eq "Appt Date"){
-        $filtered = $DataObject | Where-Object {$_."$Field" -ge $SearchName[0]  }
-        $filtered = $filtered | Where-Object {$_."$Field" -le $SearchName[1]  }
+    if($Field -eq "Appt Date"){
+        $filtered = $DataObject | Where-Object {$_."$Field" -ge $SearchName.Value[0]  }
+        $filtered = $filtered | Where-Object {$_."$Field" -le $SearchName.Value[1]  }
     }
     else {
-    $filtered = $DataObject | Where-Object {$_."$Field" -like $SearchName  }}
+    $filtered = $DataObject | Where-Object {$_."$Field" -like $SearchName.Value  }}
     return $Filtered
 }
 
@@ -183,7 +181,7 @@ Function AppActivate-Window {
 Function IDX-webpage {
     $dummypage = New-Webpage $idx
     $Shell = New-Object -COM Shell.Application
-    $idxhome = $Shell.Windows() | Where-object { $_.LocationURL -like "http://idx/gpmsweb/"}  ## Grab the window
+    $idxhome = $Shell.Windows() | Where-object { $_.LocationURL -like $idx }  ## Grab the window
     Return $idxhome
 }
 
@@ -297,7 +295,7 @@ Write-Host "Welcome to the Referral Automation Application"
                 xx ist                    (5)"
         $input = Read-Host "Input Selection:"
         Switch ($input) {
-            1 { 
+            1 {
                 ############ Possibly test netpath first? ###########
                  Write-Host "Getting Referral Report and Stagin to $Home\desktop\Local Referral Report\"  # Starts Referral Report process,  Will rename old to _old If exist
                  Get-ChildItem -path "$home\Desktop\Local Referral Report\*" -include *.pdf , *.xls , *.csv | Rename-Item -NewName {$_.name -replace $_.basename , ($_.basename +"_old") }
@@ -306,7 +304,7 @@ Write-Host "Welcome to the Referral Automation Application"
                 # Converts .xls to usable CSV
                 ExportWStoCSV -RR_FileName_NO_extention "Referral_Report" -Output_Folder_Location "$home\desktop\Local Referral Report\"
                 ; break}
-            2 { 
+            2 {
                 # Build import CSV into pscustom and reformat data
                 Format-the-fucking-data  #Fixes the CSV  #also change name..
                 # Logs into Centricity and captures Webpage Nav buttons in GLOBAL variable $IDX_NAV
@@ -434,6 +432,10 @@ Function Get-NetDrives {
 For later use in abstracting Header information
 
 $myheader = (Import-Csv -Path $directory +"\" +"Referral_Report.CSV")[0] | Get-member | Where-Object {$_.memberType -like "NoteProperty"} |Select-Object Name
+
+$FixedCSV | %{$_.'Appt Date'} | Get-Unique 
+
+PS C:\Users\Pride> $FixedCSV |  %{([datetime]::Parse($_.'Appt Date'))} | Get-Unique 
 
 #>
 
