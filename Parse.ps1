@@ -376,13 +376,12 @@ Write-Host "Welcome to the Referral Automation Application"
                             Search-Window -SearchTerm $Emed_Check_Vars.PCP_Name.value -Number $Emed_Check_Vars.PCP_Number.value
 
                         }
+                        if (!($Free_Text3.value)) {$Free_Text3.value = (get_date).toShortDateString
+                            
+                        }
                         
                     }
-
-
-                    if((Read-host "Do you want to search this Patient Record? y,n") -like "y"){
-
-                    }
+                    if((Read-host "Do you want to continue to next Patient Record? (y,n): ") -like "y"){}
                     else {break}
                 ;break}
         }
