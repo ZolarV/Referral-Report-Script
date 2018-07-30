@@ -121,6 +121,7 @@ function SelectData-byClinic {
 
 # Gets medE variables and puts them into an object
 Function GetMedE-Variables {
+    Param([Parameter(Mandatory = $True)][String]$Benefits_Window)
     $Custom = @()
     $Eligibility_Status = (((($benfits_Window.Document.frames)[0].document.getElementsByTagName("title"))[0].document.getElementsByTagName("tr") | Where-Object {$_.outertext -like "Eligibility Status:*"}).outerText).Remove(0, 19)
     $Custom | Add-Member -type NoteProperty -Name "Eligibility_Status"  -Value $Eligibility_Status
@@ -136,9 +137,9 @@ Function GetMedE-Variables {
 
 # Search Window Function
 Function Search-Window {
-    $Shell = New-Object -COM Shell.Application
     Param([Parameter(Mandatory = $True)][String]$searchTerm, [Parameter(Mandatory = $true)][int]$number)
-    $search_window = ($Shell.Windows() | Where-Object { $_.LocationName -like "Group Management Constants Search"})
+    $Shell = New-Object -COM Shell.Application
+    $search_window =  Ret-shell -page "Group Management Constants Search"
     #Search Text  Name:  search  #value = value to search by
     (Get-Elementsby -webpage $search_window -Type "Name" -value ([ref]"Search")).value = $searchTerm
     #Execute Search
@@ -179,7 +180,7 @@ Function AppActivate-Window {
 Function IDX-webpage {
     $dummypage = New-Webpage $idx
     $Shell = New-Object -COM Shell.Application
-    $idxhome = $Shell.Windows() | Where-object { $_.LocationURL -like $idx }  ## Grab the window
+    $idxhome =  Ret-shell -page  "$idx"   ## Grab the window
     Return $idxhome
 }
 
@@ -201,7 +202,7 @@ Function Get-Cred {
 Function ocemed-page {
     Param([Parameter(Mandatory = $TRUE)][object]$Credentials)
     $emed_page = New-Webpage $ocemed
-    Input-creds -Credentials $Credentials -WebPage $emed_page
+    Input-creds -Credentials $Credentials
     return $emed_page
 }
 
@@ -213,15 +214,18 @@ Function Get-ElementbyID {
 
 #Function Input's credentials into a website
 Function Input-creds {
-    Param([Parameter(Mandatory = $TRUE)][object]$Credentials, [Parameter(Mandatory = $TRUE)][object]$WebPage)
-    (Get-ElementbyID -WebPage $WebPage -ID $emed_web_use).value = $Credentials.user
-    (Get-ElementbyID -WebPage $WebPage -ID $emed_web_pass).value = $Credentials.pass
+    Param([Parameter(Mandatory = $TRUE)][object]$Credentials)
+    $WebPage = Ret-shell -page "Eligibility: Login*"
+    (Get-ElementbyID -WebPage $WebPage -ID $emed_web_use).value = "$Credentials.user"
+    (Get-ElementbyID -WebPage $WebPage -ID $emed_web_pass).value = "$Credentials.pass"
+    (Get-ElementbyID -WebPage $WebPage -ID "MainContent_btnLogon").click()
 }
 
 #function searches Emed website
 Function Search-Emed {
-    Param([Parameter(Mandatory = $TRUE)][object]$WebPage, [Parameter(Mandatory = $TRUE)][string]$Search)
-    (Get-ElementbyID -WebPage $WebPage -ID $emed_web_SubID).value = $Search
+    Param([Parameter(Mandatory = $TRUE)][string]$Search)
+    $webpage = Ret-shell -page "Eligibility: Real Time Eligibility Search*"
+    (Get-ElementbyID -WebPage $WebPage -ID $emed_web_SubID).value = "$Search"
     (Get-ElementbyID -WebPage $WebPage -ID $emed_web_Submit).click()
 }
 
@@ -343,17 +347,52 @@ Write-Host "Welcome to the Referral Automation Application"
                 # Now lets use the data selected in $mydata
                 # Login to oc.medEconnect.com
                 $oc_medE_page = ocemed-page -Credentials $emedCreds
-
                 Foreach ($This_Data in $mydata) {
-                    Patient-Manager -patientAccountNumber ($This_Data.'Acct #')
-                    Write-host "Do you want to search this Patient Record?"
-                    
+                    Patient-Manager -patientAccountNumber ($This_Data.'Acct #')             #Opens Patient Record
+                    $idxhome.Document.frames[4].document.getElementById("radioIns").click() #open Primary Insurance
+                    ($idxhome.Document.frames[4].document.getElementsByTagName("a")| Where-Object {$_.href -like "javascript:openwindow_idet(1,'P');"} ).click()  #gets Popup window
+                    $insurance_Window = Ret-shell -page "Group Management Edit Insurance Detail" # Not sure if needed yet
+                    $iwinpid = (Get-Process | Where-Object { $_.MainWindowHandle -eq $insurance_Window.Hwnd }).Id
+                    #Get Policy  For medEconnect#
+                    $policy_Value = $insurance_Window.Document.getElementsByName("policy1")[0].value   # should go to emed here and get PRI provider and Eligebility
+                    # PCP name    ID = "pcpname1"   .. search by ID
+                    $pcp_name = (Get-Elementsby -webpage $insurance_Window -Type "ID"  -value ([ref] "pcpname1")).textContent
+                    $pcp_value = (Get-Elementsby -webpage $insurance_Window -Type "name"  -value ([ref] "pcp1")).value
+
+                    # Free Text
+                    # Name = ft111  Free Test 1     Search By Name
+                    # Name = ft121  Free Test 2     Search By Name
+                    # Name = ft131  Free Test 3     Search By Name
+                    $Free_Text1 = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl11")
+                    $Free_Text2 = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl21")
+                    $Free_Text3 = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl31")
+                    #Search Emed for $policy, Return Eligebility, PRI and PRI number
+                    Search-Emed  -Search $policy_Value
+                    $Search_Emed_page = Ret-Shell "Eligibility: Real Time Eligibility Search"
+                    $Emed_Check_Vars = GetMedE-Variables -Benefits_Window $Search_Emed_page
+                    #Do logic Here with EMED Variables
+                    if ($Emed_Check_Vars.Eligibility_Status.value -like "Eligible") {
+                        if($pcp_name -notlike $Emed_Check_Vars.PCP_Name.value){
+                            Search-Window -SearchTerm $Emed_Check_Vars.PCP_Name.value -Number $Emed_Check_Vars.PCP_Number.value
+
+                        }
+                        
+                    }
+
+
+                    if((Read-host "Do you want to search this Patient Record? y,n") -like "y"){
+
+                    }
+                    else {break}
                 ;break}
         }
     }
 
 }
-
+funtion Ret-Shell{
+    Param([Parameter(Mandatory=$TRUE)][String]$page)
+    Return ($Shell.windows() | Where-Object {$_.LocationName -like "$page" })
+}
 
 
 $mydata = SelectData-byClinic -DataObject $fixedCSV -SearchName (Get-Input) -Field (Get-Input)  #Fetches the Data we want to work on
@@ -400,25 +439,10 @@ $policy_Value = $insurance_Window.Document.getElementsByName("policy1")[0].value
 # Name = pcp1     Search By Name
 # Search Box Href = javascript:search(theform.pcp1,'pcpx'); Tag = a   Seach by Tag
 
-# Opens Search Window 
+# Opens PRI Care prov Search Window
 ($insurance_Window.Document.getElementsByTagName("a")| Where-Object {$_.href -like "javascript:search(theform.pcp1,'pcpx');"} ).click() #Opens New Window  wsearch.cgi
 
  
-
-
-
-# PCP name    ID = "pcpname1"   .. search by ID
-$pcp_name = (Get-Elementsby -webpage $insurance_Window -Type "ID"  -value ([ref] "pcpname1")).textContent
-$pcp_value = (Get-Elementsby -webpage $insurance_Window -Type "name"  -value ([ref] "pcp1")).value
-
-# Free Text
-# Name = ft111  Free Test 1     Search By Name
-# Name = ft121  Free Test 2     Search By Name
-# Name = ft131  Free Test 3     Search By Name
-$Free_Text1 = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl11")
-$Free_Text2 = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl21")
-$Free_Text3 = Get-Elementsby -webpage $insurance_Window -Type "Name"  -value ([ref] "ftl31")
-
 
 
 
