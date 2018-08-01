@@ -56,7 +56,7 @@ $ref_Rep_name = "Referral_Report.xls"
 $rrl = "\\Analyzer\Analyzer\Snapshots\cos\Excel\daily\Referral_Report.xls"
 $Full_header = "Location", "Count", "Provider", "Appt Date", "Enc", "Acct #", " ", "Patient", "Entered by", "Insurance", "Error"
 $Trunc_header = "Location", "Count", "Provider", "Appt Date", "Enc", "Acct #", "Patient", "Entered by", "Insurance", "Error"
-$occreds = Get-Cred -Whatfor "OC Credentials"
+# $occreds = Get-Cred -Whatfor "OC Credentials"
 $idxCreds = Get-Cred  -Whatfor "Centricity Credentials"
 $emedCreds = Get-Cred  -Whatfor "oc.emedeconnect credentials"
 
@@ -168,6 +168,7 @@ function Send-Keys {
     AppActivate-Window($iepid)
     [System.Windows.Forms.SendKeys]::SendWait($key)
     if ($enter -ne 0) {[System.Windows.Forms.SendKeys]::SendWait("~")}
+    Start-Sleep 3
 }
 
 #major function for IDX java website to emulate keystrokes
@@ -176,7 +177,7 @@ Function AppActivate-Window {
     [Microsoft.VisualBasic.Interaction]::AppActivate($ID);
 }
 
-# Function gets IDX webpage and recaptures it after java breaks it
+# Function gets IDX webpage and recaptures it after java breaks it   ##OLD  Reworked into IDX-LOGIN
 Function IDX-webpage {
     $dummypage = New-Webpage $idx
     $Shell = New-Object -COM Shell.Application
@@ -249,8 +250,9 @@ Function New-Webpage {
 
 # Returns Homepage Nav function buttons.  instead of trying to get them a billion times.
 Function IDX-NavButtons {
+    Param([Parameter(Mandatory = $true)][object]$page)
     $Custom = New-Object psobject
-    $homepage = $idxhome.Document.frames[0].document.getElementsByTagName("a")
+    $homepage = $page.Document.frames[0].document.getElementsByTagName("a")
     $Custom | Add-Member -type NoteProperty -Name "HomePage"  -Value  $homepage
     $Custom | Add-Member -type NoteProperty -Name "Login"  -Value  ($homepage | Where-Object {$_.href -eq "javascript:wait_for_wfe(0);"})
     $Custom | Add-Member -type NoteProperty -Name "PM"  -Value  ($homepage | Where-Object {$_.href -eq "javascript:top.open_patmgr();"})
@@ -273,7 +275,9 @@ Function ExportWSToCSV ($RR_FileName_NO_extention, $Output_Folder_Location ) {
 # Main IDX Patient Logic.  Need to rebuild better.
 Function Login-IDX {
     Param([Parameter(Mandatory = $true)][String]$Practice)
-    $idxhome = IDX-webpage
+    $idxhome = New-Object -com InternetExplorer.Application
+    $dummypage = New-Webpage $idx
+    $idxhome =  Ret-shell -page  "$idx"
     $iepid = (Get-Process | Where-Object { $_.MainWindowHandle -eq $idxhome.Hwnd }).Id
     AppActivate-Window -ID $iepid
     $IDX_Nav = IDX-NavButtons
@@ -284,7 +288,16 @@ Function Login-IDX {
     Send-Keys $practice -enter 1
 }
 
-
+function Ret-Shell{
+    Param([Parameter(Mandatory=$false)][String]$Page,[Parameter(Mandatory=$false)][String]$URL)
+    IF($page){
+    $Retobj = ($Shell.windows() | Where-Object {$_.LocationName -like "$Page" })
+    }
+    if($URL) {
+    $Retobj = ($Shell.windows() | Where-Object {$_.LocationURL -like "$URL" })   
+    }
+    Return $Retobj
+}
 
 Write-Host "Welcome to the Referral Automation Application"
     $again = 0
@@ -303,6 +316,17 @@ Write-Host "Welcome to the Referral Automation Application"
                  Write-Host "Getting Referral Report and staging to $local_Ref_Rep_Dir"  # Starts Referral Report process,  Will rename old to _old If exist
                  Get-ChildItem -path "$home\Desktop\Local Referral Report\*" -include *.pdf , *.xls , *.csv | Rename-Item -NewName {$_.name -replace $_.basename , ($_.basename +"_old") }
                 # Starts Bits Transfer of file
+                [bool]$Analyzer_ISmapped = $false
+                $a = net use
+                $Shell.Explore("\\Analyzer\")
+                While(!($Analyzer_ISmapped)){
+                    Foreach($line in $a ){
+                        $Analyzer_ISmapped = $line.contains("Analyzer")
+                        if($Analyzer_ISmapped){break}
+                    }
+                    $Shell.Explore("\\Analyzer\")
+                    $a = net use
+                }
                  Start-BitsTransfer -Source $rrl -Destination $local_Ref_Rep_Dir
                 # Converts .xls to usable CSV
                 ExportWStoCSV -RR_FileName_NO_extention "Referral_Report" -Output_Folder_Location $local_Ref_Rep_Dir
@@ -313,9 +337,10 @@ Write-Host "Welcome to the Referral Automation Application"
                 Format-the-fucking-data  #Fixes the CSV  #also change name..
                 $mydata = $fixedCSV # initializes unfiltered data 
                 # Logs into Centricity and captures Webpage Nav buttons in GLOBAL variable $IDX_NAV
-                $practice = Read-Host -Prompt "Please Enter Practice. E.G: COS, TST ..."
+                $practice = Read-Host -Prompt "Please Enter Practice. E.G: COS, TST ..."  #TODO  Add logic to differentiate  in Login-IDX
                 Login-IDX -Practice $practice
                 #open PM
+                $IDX_Nav = IDX-NavButtons -page (Ret-Shell -URL "$idx")
                 $IDX_Nav.PM.click()
                 #build filter variable.   as PS custom object.  multimember use each memeber as a method for itterating through and filtering sequentially
                 $Field_Array = @()
@@ -388,10 +413,7 @@ Write-Host "Welcome to the Referral Automation Application"
     }
 
 }
-funtion Ret-Shell{
-    Param([Parameter(Mandatory=$TRUE)][String]$page)
-    Return ($Shell.windows() | Where-Object {$_.LocationName -like "$page" })
-}
+
 
 
 $mydata = SelectData-byClinic -DataObject $fixedCSV -SearchName (Get-Input) -Field (Get-Input)  #Fetches the Data we want to work on
