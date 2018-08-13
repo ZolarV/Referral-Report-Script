@@ -54,7 +54,7 @@ $local_Ref_Rep_Dir = "$home\desktop\Local Referral Report\"
 $ref_Rep_name = "Referral_Report.xls"
 $rrl = "\\Analyzer\Analyzer\Snapshots\cos\Excel\daily\Referral_Report.xls"
 $Full_header = "Location", "Count", "Provider", "Appt Date", "Enc", "Acct #", " ", "Patient", "Entered by", "Insurance", "Error"
-$Trunc_header = "Location", "Count", "Provider", "Appt Date", "Enc", "Acct #", "Patient", "Entered by", "Insurance", "Error"
+$Trunc_header = "Location","Count", "Provider", "Appt Date", "Enc", "Acct #", "Patient", "Entered by", "Insurance", "Error"
 
 # .net Interfaces used in manipulating the embedded Java applet
 [void] [System.Reflection.Assembly]::LoadWithPartialName("'System.Windows.Forms")
@@ -90,10 +90,11 @@ function Add-Data {
         [Parameter(Mandatory = $true)][int]$counter,
         [Parameter(Mandatory = $true)][Object]$Dataobject)
         if( $Trunc_header[$counter] -eq "Appt Date"){
-            $ReturnObject | Add-Member -TypeName NoteProperty -NotePropertyName $Trunc_header[$counter] -NotePropertyValue [dateTime]::Parse($DataObject."$($Trunc_header[$counter])")
+            $Dataobject
+             Add-Member -InputObject $ReturnObject -MemberType NoteProperty -Name  $Trunc_header[$counter] -Value ([dateTime]::Parse($DataObject."$($Trunc_header[$counter])"))
         }
         Else{
-            $ReturnObject | Add-Member -typeName NoteProperty -NotePropertyName $Trunc_header[$counter] -NotePropertyValue $DataObject."$($Trunc_header[$counter])"
+             Add-Member -InputObject $ReturnObject -MemberType NoteProperty -Name $Trunc_header[$counter] -Value ($DataObject."$($Trunc_header[$counter])")
         }
 
 }
@@ -101,6 +102,7 @@ function Add-Data {
 #  dynamically  name a variable with a variable === $value=$NetworkInfo."$($_.Name)"
 function Format-data {
     $FixedCSV = @()
+    $last = New-Object PSObject
     $shitCSV = (Import-Csv "$home\desktop\Local Referral Report\Referral_Report.csv" -Header $Full_header | Select-Object $Trunc_header | Select-Object -Skip 1)
     $counter = 0
     foreach ( $line in $shitCSV) {
