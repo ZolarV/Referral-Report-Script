@@ -12,7 +12,7 @@
 			B:  Create local location and download .XLS to local
 		Step 2: Convert .XLS to .CSV  using  ExportWStoCSV function
 			A:  Save export to Local folder
-		Step 3: Fix CSV data by using  Format-The-Fucking-Data Function   ###### NOTICE ##### Change the function name.  
+		Step 3: Fix CSV data by using  Format--Data Function   
 			A:	Note: Colsolidate CSV done by calling Add-Data for pscustomobject.  Need to abstract a tad more, currently hardcoded to use $header[$index]
 		Step 4: Filter fixedCSV data using user input for Field to search and searchterm  using SelectData-ByClinic   ###  Bad name rename
 		Step 5: Login to IDX  
@@ -46,7 +46,6 @@ $emed_web_SubID = "tabContainer_tabSearch_txtCertificateNumber"
 $emed_web_Submit = "tabContainer_tabSearch_btnHSubmit"
 
 #HighScope Constants
-$fixedCSV = @()
 $CurrentDate = Get-Date
 $IDX_Nav = New-Object PSObject
 
@@ -56,9 +55,6 @@ $ref_Rep_name = "Referral_Report.xls"
 $rrl = "\\Analyzer\Analyzer\Snapshots\cos\Excel\daily\Referral_Report.xls"
 $Full_header = "Location", "Count", "Provider", "Appt Date", "Enc", "Acct #", " ", "Patient", "Entered by", "Insurance", "Error"
 $Trunc_header = "Location", "Count", "Provider", "Appt Date", "Enc", "Acct #", "Patient", "Entered by", "Insurance", "Error"
-# $occreds = Get-Cred -Whatfor "OC Credentials"
-$idxCreds = Get-Cred  -Whatfor "Centricity Credentials"
-$emedCreds = Get-Cred  -Whatfor "oc.emedeconnect credentials"
 
 # .net Interfaces used in manipulating the embedded Java applet
 [void] [System.Reflection.Assembly]::LoadWithPartialName("'System.Windows.Forms")
@@ -69,6 +65,23 @@ if (!(Test-Path -Path $local_Ref_Rep_Dir)) {
     New-Item -Path $home\desktop\ -Name "Local Referral Report" -ItemType dir
 }
 
+#simple Get cred function
+Function Get-Cred {
+    Param([Parameter(Mandatory = $False)][string]$Whatfor)
+    if ($whatfor) {Write-Host "Enter credentials for: $whatfor"}
+    $Creds = @()
+    $User = Read-Host 'Enter Username'
+    $pass = Read-Host 'Enter Password'
+    $Creds = @([pscustomObject] @{
+            User = $User
+            Pass = $Pass
+        })
+    Return $creds
+}
+
+# $occreds = Get-Cred -Whatfor "OC Credentials"
+$idxCreds = Get-Cred  -Whatfor "Centricity Credentials"
+$emedCreds = Get-Cred  -Whatfor "oc.emedeconnect credentials"
 
 # Consolidates and completes each CSV object
 function Add-Data {
@@ -77,16 +90,17 @@ function Add-Data {
         [Parameter(Mandatory = $true)][int]$counter,
         [Parameter(Mandatory = $true)][Object]$Dataobject)
         if( $Trunc_header[$counter] -eq "Appt Date"){
-            $ReturnObject | Add-Member -type NoteProperty -Name $Trunc_header[$counter] -Value [dateTime]::Parse($DataObject."$($Trunc_header[$counter])")
+            $ReturnObject | Add-Member -TypeName NoteProperty -NotePropertyName $Trunc_header[$counter] -NotePropertyValue [dateTime]::Parse($DataObject."$($Trunc_header[$counter])")
         }
         Else{
-            $ReturnObject | Add-Member -type NoteProperty -Name $Trunc_header[$counter] -Value $DataObject."$($Trunc_header[$counter])"
+            $ReturnObject | Add-Member -typeName NoteProperty -NotePropertyName $Trunc_header[$counter] -NotePropertyValue $DataObject."$($Trunc_header[$counter])"
         }
 
 }
 
 #  dynamically  name a variable with a variable === $value=$NetworkInfo."$($_.Name)"
-function Format-the-fucking-data {
+function Format-data {
+    $FixedCSV = @()
     $shitCSV = (Import-Csv "$home\desktop\Local Referral Report\Referral_Report.csv" -Header $Full_header | Select-Object $Trunc_header | Select-Object -Skip 1)
     $counter = 0
     foreach ( $line in $shitCSV) {
@@ -104,6 +118,7 @@ function Format-the-fucking-data {
         #neat little progress bar for the functions that take longer
         Write-Progress -Activity "Building Data" -Status "Progress" -PercentComplete (($counter / $shitCSV.Count) * 100 )
     }
+    Return $FixedCSV
 }
 
 # Returns selected data from the csv object.    Supply both field to search and the search term
@@ -183,20 +198,6 @@ Function IDX-webpage {
     $Shell = New-Object -COM Shell.Application
     $idxhome =  Ret-shell -page  "$idx"   ## Grab the window
     Return $idxhome
-}
-
-#simple Get cred function
-Function Get-Cred {
-    Param([Parameter(Mandatory = $False)][string]$Whatfor)
-    if ($whatfor) {Write-Host "Enter credentials for: $whatfor"}
-    $Creds = @()
-    $User = Read-Host 'Enter Username'
-    $pass = Read-Host 'Enter Password'
-    $Creds = @([pscustomObject] @{
-            User = $User
-            Pass = $Pass
-        })
-    Return $creds
 }
 
 #main OC med function
@@ -286,6 +287,7 @@ Function Login-IDX {
     Send-Keys $idxCreds.Pass -enter 1
     Send-Keys -enter 1
     Send-Keys $practice -enter 1
+    return $idxhome
 }
 
 function Ret-Shell{
@@ -318,6 +320,7 @@ Write-Host "Welcome to the Referral Automation Application"
                 # Starts Bits Transfer of file
                 [bool]$Analyzer_ISmapped = $false
                 $a = net use
+                $shell = New-Object -ComObject Shell.Application
                 $Shell.Explore("\\Analyzer\")
                 While(!($Analyzer_ISmapped)){
                     Foreach($line in $a ){
@@ -334,11 +337,12 @@ Write-Host "Welcome to the Referral Automation Application"
             2 {
                 $again =0
                 # Build import CSV into pscustom and reformat data
-                Format-the-fucking-data  #Fixes the CSV  #also change name..
-                $mydata = $fixedCSV # initializes unfiltered data 
+                 #Fixes the CSV 
+                $mydata =  Format-data # initializes unfiltered data 
                 # Logs into Centricity and captures Webpage Nav buttons in GLOBAL variable $IDX_NAV
+                $idxhome = New-Object -com InternetExplorer.Application
                 $practice = Read-Host -Prompt "Please Enter Practice. E.G: COS, TST ..."  #TODO  Add logic to differentiate  in Login-IDX
-                Login-IDX -Practice $practice
+                $idxhome = Login-IDX -Practice $practice
                 #open PM
                 $IDX_Nav = IDX-NavButtons -page (Ret-Shell -URL "$idx")
                 $IDX_Nav.PM.click()
@@ -401,7 +405,7 @@ Write-Host "Welcome to the Referral Automation Application"
                             Search-Window -SearchTerm $Emed_Check_Vars.PCP_Name.value -Number $Emed_Check_Vars.PCP_Number.value
 
                         }
-                        if (!($Free_Text3.value)) {$Free_Text3.value = (get_date).toShortDateString
+                        if (!($Free_Text3.value)) {$Free_Text3.value = $CurrentDate.toShortDateString
                             
                         }
                         
